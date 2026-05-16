@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Viewer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f5f7fa; color: #1a1a2e; line-height: 1.5; }
+
+  .topbar { background: #1a1a2e; color: #fff; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+  .topbar h1 { font-size: 18px; font-weight: 600; }
+  .topbar a { color: #93c5fd; text-decoration: none; font-size: 14px; }
+  .topbar a:hover { text-decoration: underline; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+
+  .meta-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin-bottom: 16px; }
+  .meta-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 10px; color: #1a1a2e; }
+  .meta-grid { display: grid; grid-template-columns: 130px 1fr 130px 1fr; gap: 6px 14px; font-size: 14px; }
+  .meta-grid dt { color: #64748b; font-weight: 500; }
+  .meta-grid dd { color: #1a1a2e; }
+  .meta-grid .tags span { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-right: 4px; }
+
+  .nav-bar { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 18px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .nav-bar .page-label { font-size: 15px; font-weight: 600; color: #1a1a2e; }
+  .nav-controls { display: flex; gap: 8px; align-items: center; }
+  .nav-controls select { padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+
+  .btn { padding: 8px 18px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: .15s; }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+  .btn-sm { padding: 6px 14px; font-size: 13px; }
+
+  .page-content { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; white-space: pre-wrap; font-size: 15px; line-height: 1.8; color: #334155; min-height: 200px; }
+
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #cbd5e1; border-top-color: #3b82f6; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error { color: #ef4444; padding: 24px; text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1 id="topTitle">Page Viewer</h1>
+  <a href="/">Back to search</a>
+</div>
+
+<div class="container">
+  <div id="metaCard" class="meta-card" style="display:none">
+    <h2 id="metaTitle"></h2>
+    <dl id="metaGrid" class="meta-grid"></dl>
+  </div>
+
+  <div class="nav-bar">
+    <span id="pageLabel" class="page-label"></span>
+    <div class="nav-controls">
+      <button id="prevBtn" class="btn btn-primary btn-sm" disabled>Prev</button>
+      <select id="pageSelect"></select>
+      <button id="nextBtn" class="btn btn-primary btn-sm" disabled>Next</button>
+    </div>
+  </div>
+
+  <div id="pageContent" class="page-content">
+    <span class="spinner"></span> Loading...
+  </div>
+</div>
+
+<script>
+const pathParts = window.location.pathname.split('/');
+const pdfId = decodeURIComponent(pathParts[2]);
+const initialPage = parseInt(pathParts[3], 10);
+
+let allPages = [];
+let currentIdx = 0;
+let metadata = null;
+
+document.getElementById('topTitle').textContent = `${pdfId} - Page ${initialPage}`;
+
+async function init() {
+  const [metaResp, pagesResp] = await Promise.all([
+    fetch(`/pdfs/${encodeURIComponent(pdfId)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch(`/pdf/${encodeURIComponent(pdfId)}/pages`).then(r => r.json()).catch(() => ({ hits: [] })),
+  ]);
+
+  metadata = metaResp;
+  allPages = pagesResp.hits.map(h => h.page_number);
+
+  if (allPages.length === 0) allPages = [initialPage];
+
+  renderMeta();
+  renderSelect();
+
+  const startIdx = allPages.indexOf(initialPage);
+  await loadPage(startIdx >= 0 ? startIdx : 0);
+}
+
+function renderMeta() {
+  if (!metadata) return;
+  const card = document.getElementById('metaCard');
+  const title = document.getElementById('metaTitle');
+  const grid = document.getElementById('metaGrid');
+
+  title.textContent = metadata.pdf_filename || metadata.pdf_id;
+  const tags = (metadata.tags || []).map(t => `<span>${esc(t)}</span>`).join('') || '—';
+
+  grid.innerHTML = `
+    <dt>PDF ID</dt><dd>${esc(metadata.pdf_id)}</dd>
+    <dt>Total pages</dt><dd>${metadata.total_pages ?? '—'}</dd>
+    <dt>Indexed pages</dt><dd>${metadata.indexed_pages ?? '—'}</dd>
+    <dt>File size</dt><dd>${metadata.file_size_bytes ? formatBytes(metadata.file_size_bytes) : '—'}</dd>
+    <dt>Uploaded</dt><dd>${formatDate(metadata.uploaded_at)}</dd>
+    <dt>Last indexed</dt><dd>${formatDate(metadata.last_indexed_at)}</dd>
+    <dt>Tags</dt><dd class="tags">${tags}</dd>
+    <dt>Description</dt><dd>${esc(metadata.description || '—')}</dd>
+  `;
+  card.style.display = 'block';
+}
+
+function renderSelect() {
+  const select = document.getElementById('pageSelect');
+  select.innerHTML = allPages.map((p, i) => `<option value="${i}">Page ${p}</option>`).join('');
+  select.addEventListener('change', () => loadPage(parseInt(select.value, 10)));
+}
+
+async function loadPage(idx) {
+  if (idx < 0 || idx >= allPages.length) return;
+  currentIdx = idx;
+  const pageNum = allPages[idx];
+
+  document.getElementById('pageLabel').textContent = `Page ${pageNum} of ${allPages.length}`;
+  document.getElementById('pageSelect').value = idx;
+  document.getElementById('prevBtn').disabled = idx === 0;
+  document.getElementById('nextBtn').disabled = idx >= allPages.length - 1;
+  document.getElementById('topTitle').textContent = `${pdfId} - Page ${pageNum}`;
+  document.title = `${pdfId} - Page ${pageNum}`;
+
+  const url = `/view/${encodeURIComponent(pdfId)}/${pageNum}`;
+  history.replaceState(null, '', url);
+
+  const content = document.getElementById('pageContent');
+  content.innerHTML = '<span class="spinner"></span> Loading...';
+
+  try {
+    const resp = await fetch(`/pdf/${encodeURIComponent(pdfId)}/pages/${pageNum}`);
+    if (!resp.ok) throw new Error(`${resp.status}`);
+    const data = await resp.json();
+    content.textContent = data.text || '(empty page)';
+  } catch (err) {
+    content.innerHTML = `<div class="error">Failed to load page: ${esc(err.message)}</div>`;
+  }
+}
+
+document.getElementById('prevBtn').addEventListener('click', () => loadPage(currentIdx - 1));
+document.getElementById('nextBtn').addEventListener('click', () => loadPage(currentIdx + 1));
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowLeft') loadPage(currentIdx - 1);
+  if (e.key === 'ArrowRight') loadPage(currentIdx + 1);
+});
+
+function esc(s) {
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el.innerHTML;
+}
+
+function formatBytes(b) {
+  if (b == null) return '—';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+init();
+</script>
+</body>
+</html>

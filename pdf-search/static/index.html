@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Page Search</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f5f7fa; color: #1a1a2e; line-height: 1.5; }
+
+  .header { background: #1a1a2e; color: #fff; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 20px; font-weight: 600; }
+  .header .health { font-size: 13px; opacity: .7; margin-left: auto; }
+  .header .health.ok { color: #4ade80; opacity: 1; }
+  .header .health.err { color: #f87171; opacity: 1; }
+
+  .tabs { display: flex; background: #fff; border-bottom: 2px solid #e2e8f0; }
+  .tab { padding: 12px 24px; cursor: pointer; font-weight: 500; color: #64748b; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: .15s; user-select: none; }
+  .tab:hover { color: #1a1a2e; }
+  .tab.active { color: #1a1a2e; border-bottom-color: #3b82f6; }
+
+  .panel { display: none; max-width: 960px; margin: 24px auto; padding: 0 16px; }
+  .panel.active { display: block; }
+
+  /* Upload */
+  .drop-zone { border: 2px dashed #94a3b8; border-radius: 12px; padding: 48px 24px; text-align: center; color: #64748b; cursor: pointer; transition: .2s; background: #fff; }
+  .drop-zone.over { border-color: #3b82f6; background: #eff6ff; color: #3b82f6; }
+  .drop-zone p { font-size: 15px; }
+  .drop-zone .icon { font-size: 36px; margin-bottom: 8px; }
+
+  .file-list { margin-top: 16px; }
+  .file-list table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; }
+  .file-list th, .file-list td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+  .file-list th { background: #f8fafc; font-weight: 600; color: #475569; }
+  .file-list .remove { cursor: pointer; color: #ef4444; background: none; border: none; font-size: 16px; }
+
+  .upload-form { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 13px; font-weight: 500; color: #475569; }
+  .field input { padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; width: 220px; }
+
+  .btn { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: .15s; }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+  .btn-danger { background: #ef4444; color: #fff; }
+  .btn-danger:hover { background: #dc2626; }
+  .btn-sm { padding: 4px 12px; font-size: 13px; }
+
+  .status-msg { margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 14px; }
+  .status-msg.success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+  .status-msg.error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+
+  /* Browse */
+  .browse-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+  .browse-controls .info { font-size: 14px; color: #64748b; }
+
+  .pdf-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .pdf-table th, .pdf-table td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+  .pdf-table th { background: #f8fafc; font-weight: 600; color: #475569; position: sticky; top: 0; }
+  .pdf-table tr:hover td { background: #f8fafc; }
+  .pdf-table tr { cursor: pointer; }
+  .pdf-table .tags span { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-right: 4px; }
+
+  .pagination { display: flex; gap: 8px; align-items: center; margin-top: 16px; justify-content: center; }
+  .pagination button { padding: 6px 14px; }
+  .pagination .page-info { font-size: 14px; color: #64748b; }
+
+  .detail-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 16px; padding: 20px; display: none; }
+  .detail-panel.open { display: block; }
+  .detail-panel h3 { font-size: 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .detail-grid { display: grid; grid-template-columns: 140px 1fr; gap: 6px 16px; font-size: 14px; }
+  .detail-grid dt { color: #64748b; font-weight: 500; }
+  .detail-grid dd { color: #1a1a2e; }
+  .detail-grid dd.pages-list { max-height: 80px; overflow-y: auto; font-family: monospace; font-size: 13px; }
+  .detail-close { cursor: pointer; font-size: 20px; color: #64748b; background: none; border: none; }
+
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #cbd5e1; border-top-color: #3b82f6; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty { text-align: center; padding: 48px; color: #94a3b8; font-size: 15px; }
+
+  /* Search */
+  .search-bar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+  .search-bar input[type="text"] { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 15px; flex: 1; min-width: 200px; }
+  .search-bar input[type="text"]:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+  .search-options { display: flex; gap: 16px; margin-top: 10px; align-items: center; font-size: 14px; color: #475569; }
+  .search-options label { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+  .search-info { margin-top: 16px; font-size: 14px; color: #64748b; }
+  .search-results { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .search-hit { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; transition: .15s; display: block; text-decoration: none; color: inherit; cursor: pointer; }
+  .search-hit:hover { border-color: #3b82f6; }
+  .search-hit .hit-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .search-hit .hit-pdf { font-weight: 600; color: #1a1a2e; font-size: 14px; }
+  .search-hit .hit-page { font-size: 13px; color: #64748b; }
+  .search-hit .hit-score { font-size: 12px; color: #94a3b8; }
+  .search-hit .hit-snippet { font-size: 14px; color: #334155; line-height: 1.6; }
+  .search-hit .hit-snippet em { background: #fef08a; color: #1a1a2e; font-style: normal; padding: 1px 2px; border-radius: 2px; }
+  .search-pagination { display: flex; gap: 8px; align-items: center; margin-top: 16px; justify-content: center; }
+  .search-pagination .page-info { font-size: 14px; color: #64748b; }
+
+  /* Page viewer */
+  .page-viewer { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 16px; display: none; }
+  .page-viewer.open { display: block; }
+  .page-viewer-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; border-radius: 8px 8px 0 0; }
+  .page-viewer-header h4 { font-size: 15px; font-weight: 600; }
+  .page-viewer-nav { display: flex; gap: 6px; align-items: center; }
+  .page-viewer-nav select { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
+  .page-viewer-body { padding: 18px; white-space: pre-wrap; font-size: 14px; line-height: 1.7; color: #334155; max-height: 500px; overflow-y: auto; font-family: inherit; }
+  .page-viewer-all { padding: 0; }
+  .page-viewer-all .pv-page { padding: 18px; border-bottom: 1px solid #e2e8f0; }
+  .page-viewer-all .pv-page:last-child { border-bottom: none; }
+  .page-viewer-all .pv-page-header { font-size: 13px; font-weight: 600; color: #3b82f6; margin-bottom: 8px; }
+  .page-viewer-all .pv-page-text { white-space: pre-wrap; font-size: 14px; line-height: 1.7; color: #334155; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>PDF Page Search</h1>
+  <span id="health" class="health">checking...</span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="search">Search</div>
+  <div class="tab" data-tab="upload">Upload</div>
+  <div class="tab" data-tab="browse">Browse</div>
+</div>
+
+<!-- SEARCH PANEL -->
+<div id="search" class="panel active">
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Search across all PDF pages..." autofocus>
+    <button id="searchBtn" class="btn btn-primary">Search</button>
+  </div>
+  <div class="search-options">
+    <label><input type="radio" name="searchMode" value="word" checked> Word (fuzzy)</label>
+    <label><input type="radio" name="searchMode" value="phrase"> Exact phrase</label>
+  </div>
+  <div id="searchInfo" class="search-info"></div>
+  <div id="searchResults" class="search-results"></div>
+  <div id="searchPagination" class="search-pagination" style="display:none">
+    <button id="searchPrevBtn" class="btn btn-primary btn-sm" disabled>Prev</button>
+    <span id="searchPageInfo" class="page-info"></span>
+    <button id="searchNextBtn" class="btn btn-primary btn-sm" disabled>Next</button>
+  </div>
+</div>
+
+<!-- UPLOAD PANEL -->
+<div id="upload" class="panel">
+  <div id="dropZone" class="drop-zone">
+    <div class="icon">&#128196;</div>
+    <p>Drag &amp; drop <strong>.txt</strong> files here, or click to select</p>
+    <p style="font-size:13px;margin-top:4px;">Files named <code>page_N.txt</code> get their page number from the filename; others are numbered sequentially.</p>
+    <input type="file" id="fileInput" multiple accept=".txt" style="display:none">
+  </div>
+
+  <div id="fileListSection" class="file-list" style="display:none">
+    <table>
+      <thead><tr><th>#</th><th>File</th><th>Page&nbsp;#</th><th>Size</th><th></th></tr></thead>
+      <tbody id="fileListBody"></tbody>
+    </table>
+  </div>
+
+  <div class="upload-form">
+    <div class="field">
+      <label for="pdfId">PDF ID</label>
+      <input type="text" id="pdfId" placeholder="e.g. annual_report_2024">
+    </div>
+    <div class="field">
+      <label for="pdfFilename">Filename</label>
+      <input type="text" id="pdfFilename" placeholder="e.g. annual_report_2024.pdf">
+    </div>
+    <button id="uploadBtn" class="btn btn-primary" disabled>Upload</button>
+  </div>
+
+  <div id="uploadStatus"></div>
+</div>
+
+<!-- BROWSE PANEL -->
+<div id="browse" class="panel">
+  <div class="browse-controls">
+    <span id="browseInfo" class="info"></span>
+    <button class="btn btn-primary btn-sm" onclick="loadPdfs()">Refresh</button>
+  </div>
+
+  <table class="pdf-table">
+    <thead>
+      <tr>
+        <th>PDF ID</th>
+        <th>Filename</th>
+        <th>Pages</th>
+        <th>Tags</th>
+        <th>Uploaded</th>
+      </tr>
+    </thead>
+    <tbody id="pdfTableBody"></tbody>
+  </table>
+
+  <div class="pagination">
+    <button id="prevBtn" class="btn btn-primary btn-sm" disabled onclick="changePage(-1)">Prev</button>
+    <span id="pageInfo" class="page-info"></span>
+    <button id="nextBtn" class="btn btn-primary btn-sm" disabled onclick="changePage(1)">Next</button>
+  </div>
+
+  <div id="detailPanel" class="detail-panel">
+    <h3>
+      <span id="detailTitle"></span>
+      <span>
+        <button id="detailViewPages" class="btn btn-primary btn-sm" style="margin-right:4px">View Pages</button>
+        <button id="detailDelete" class="btn btn-danger btn-sm" style="margin-right:8px">Delete</button>
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+      </span>
+    </h3>
+    <dl id="detailGrid" class="detail-grid"></dl>
+  </div>
+
+  <div id="pageViewer" class="page-viewer">
+    <div class="page-viewer-header">
+      <h4 id="pvTitle"></h4>
+      <div class="page-viewer-nav">
+        <button id="pvPrev" class="btn btn-primary btn-sm" onclick="pvNav(-1)">Prev</button>
+        <select id="pvSelect" onchange="pvGoTo(this.value)"></select>
+        <button id="pvNext" class="btn btn-primary btn-sm" onclick="pvNav(1)">Next</button>
+        <button id="pvShowAll" class="btn btn-primary btn-sm" onclick="pvLoadAll()">All Pages</button>
+        <button class="detail-close" onclick="closePageViewer()">&times;</button>
+      </div>
+    </div>
+    <div id="pvBody" class="page-viewer-body"></div>
+  </div>
+</div>
+
+<script>
+const PAGE_SIZE = 20;
+let currentPage = 0;
+let totalPdfs = 0;
+let droppedFiles = [];
+
+// --- Tabs ---
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'browse') loadPdfs();
+  });
+});
+
+// --- Health ---
+async function checkHealth() {
+  const el = document.getElementById('health');
+  try {
+    const r = await fetch('/health');
+    const d = await r.json();
+    el.textContent = `ES: ${d.cluster_status} | ${d.pdf_pages_count} pages | ${d.pdf_metadata_count} PDFs`;
+    el.className = 'health ok';
+  } catch {
+    el.textContent = 'ES unreachable';
+    el.className = 'health err';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 30000);
+
+// --- Upload: drag & drop ---
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('over');
+  addFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+
+function extractPageNumber(filename, fallbackIndex) {
+  const m = filename.match(/page[_\-]?(\d+)\.txt$/i);
+  return m ? parseInt(m[1], 10) : fallbackIndex + 1;
+}
+
+function addFiles(fileList) {
+  const startIdx = droppedFiles.length;
+  for (let i = 0; i < fileList.length; i++) {
+    const f = fileList[i];
+    if (!f.name.endsWith('.txt')) continue;
+    droppedFiles.push({ file: f, pageNum: extractPageNumber(f.name, startIdx + i) });
+  }
+  renderFileList();
+  autoFillFields();
+}
+
+function removeFile(idx) {
+  droppedFiles.splice(idx, 1);
+  renderFileList();
+}
+
+function renderFileList() {
+  const section = document.getElementById('fileListSection');
+  const tbody = document.getElementById('fileListBody');
+  const btn = document.getElementById('uploadBtn');
+
+  if (droppedFiles.length === 0) {
+    section.style.display = 'none';
+    btn.disabled = true;
+    return;
+  }
+  section.style.display = 'block';
+  btn.disabled = false;
+
+  tbody.innerHTML = droppedFiles.map((d, i) =>
+    `<tr>
+      <td>${i + 1}</td>
+      <td>${esc(d.file.name)}</td>
+      <td>${d.pageNum}</td>
+      <td>${formatBytes(d.file.size)}</td>
+      <td><button class="remove" onclick="removeFile(${i})">&times;</button></td>
+    </tr>`
+  ).join('');
+}
+
+function autoFillFields() {
+  if (droppedFiles.length === 0) return;
+  const pdfIdEl = document.getElementById('pdfId');
+  const pdfFnEl = document.getElementById('pdfFilename');
+  if (!pdfIdEl.value) {
+    const base = droppedFiles[0].file.name.replace(/page[_\-]?\d+\.txt$/i, '').replace(/[_\-]+$/, '') || 'upload';
+    pdfIdEl.value = base || 'upload_' + Date.now();
+    pdfFnEl.value = base + '.pdf';
+  }
+}
+
+// --- Upload: submit ---
+document.getElementById('uploadBtn').addEventListener('click', doUpload);
+
+async function doUpload() {
+  const pdfId = document.getElementById('pdfId').value.trim();
+  const pdfFilename = document.getElementById('pdfFilename').value.trim();
+  if (!pdfId || !pdfFilename || droppedFiles.length === 0) return;
+
+  const btn = document.getElementById('uploadBtn');
+  const statusEl = document.getElementById('uploadStatus');
+  btn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span> Reading files and uploading...';
+  statusEl.className = 'status-msg';
+
+  try {
+    const pages = [];
+    for (const d of droppedFiles) {
+      const text = await readFileText(d.file);
+      pages.push({ page_number: d.pageNum, text });
+    }
+
+    const totalSize = droppedFiles.reduce((s, d) => s + d.file.size, 0);
+    const body = {
+      pdf_id: pdfId,
+      pdf_filename: pdfFilename,
+      pages,
+      metadata: {
+        total_pages: pages.length,
+        file_size_bytes: totalSize,
+      },
+    };
+
+    const resp = await fetch('/ingest/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`Server returned ${resp.status}: ${errText}`);
+    }
+
+    const result = await resp.json();
+    statusEl.className = 'status-msg success';
+    statusEl.textContent = `Indexed ${result.indexed_count} pages for "${pdfId}" (${result.failure_count} failures)`;
+
+    droppedFiles = [];
+    renderFileList();
+    document.getElementById('pdfId').value = '';
+    document.getElementById('pdfFilename').value = '';
+    checkHealth();
+  } catch (err) {
+    statusEl.className = 'status-msg error';
+    statusEl.textContent = `Upload failed: ${err.message}`;
+  } finally {
+    btn.disabled = droppedFiles.length === 0;
+  }
+}
+
+function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+// --- Browse ---
+async function loadPdfs() {
+  const tbody = document.getElementById('pdfTableBody');
+  const info = document.getElementById('browseInfo');
+  tbody.innerHTML = '<tr><td colspan="5" class="empty"><span class="spinner"></span> Loading...</td></tr>';
+  closeDetail();
+
+  try {
+    const resp = await fetch(`/pdfs?page=${currentPage}&page_size=${PAGE_SIZE}`);
+    const data = await resp.json();
+    totalPdfs = data.total;
+    const totalPages = Math.ceil(totalPdfs / PAGE_SIZE);
+
+    info.textContent = `${totalPdfs} PDFs total`;
+
+    if (data.pdfs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No PDFs indexed yet. Upload some files first.</td></tr>';
+    } else {
+      tbody.innerHTML = data.pdfs.map(pdf => `
+        <tr onclick="showDetail('${esc(pdf.pdf_id)}')">
+          <td><strong>${esc(pdf.pdf_id)}</strong></td>
+          <td>${esc(pdf.pdf_filename || '')}</td>
+          <td>${pdf.total_pages ?? '—'}</td>
+          <td class="tags">${(pdf.tags || []).map(t => `<span>${esc(t)}</span>`).join('')}</td>
+          <td>${formatDate(pdf.uploaded_at)}</td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('prevBtn').disabled = currentPage === 0;
+    document.getElementById('nextBtn').disabled = currentPage >= totalPages - 1;
+    document.getElementById('pageInfo').textContent = totalPages > 0 ? `Page ${currentPage + 1} of ${totalPages}` : '';
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty" style="color:#ef4444">Failed to load: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+function changePage(delta) {
+  currentPage += delta;
+  if (currentPage < 0) currentPage = 0;
+  loadPdfs();
+}
+
+// --- Detail ---
+async function showDetail(pdfId) {
+  const panel = document.getElementById('detailPanel');
+  const title = document.getElementById('detailTitle');
+  const grid = document.getElementById('detailGrid');
+
+  title.textContent = pdfId;
+  grid.innerHTML = '<span class="spinner"></span> Loading...';
+  panel.classList.add('open');
+
+  try {
+    const resp = await fetch(`/pdfs/${encodeURIComponent(pdfId)}`);
+    const d = await resp.json();
+
+    grid.innerHTML = `
+      <dt>Filename</dt><dd>${esc(d.pdf_filename || '')}</dd>
+      <dt>Total pages</dt><dd>${d.total_pages ?? '—'}</dd>
+      <dt>Indexed pages</dt><dd>${d.indexed_pages ?? '—'}</dd>
+      <dt>File size</dt><dd>${d.file_size_bytes ? formatBytes(d.file_size_bytes) : '—'}</dd>
+      <dt>Uploaded</dt><dd>${formatDate(d.uploaded_at)}</dd>
+      <dt>Last indexed</dt><dd>${formatDate(d.last_indexed_at)}</dd>
+      <dt>Tags</dt><dd>${(d.tags || []).join(', ') || '—'}</dd>
+      <dt>Description</dt><dd>${esc(d.description || '—')}</dd>
+      <dt>Page numbers</dt><dd class="pages-list">${(d.page_numbers || []).join(', ') || '—'}</dd>
+      ${d.extra_metadata ? `<dt>Extra metadata</dt><dd><code>${esc(JSON.stringify(d.extra_metadata))}</code></dd>` : ''}
+    `;
+
+    document.getElementById('detailDelete').onclick = () => deletePdf(pdfId);
+    document.getElementById('detailViewPages').onclick = () => openPageViewer(pdfId, d.page_numbers || []);
+  } catch (err) {
+    grid.innerHTML = `<span style="color:#ef4444">Failed: ${esc(err.message)}</span>`;
+  }
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.remove('open');
+  closePageViewer();
+}
+
+async function deletePdf(pdfId) {
+  if (!confirm(`Delete "${pdfId}" and all its pages?`)) return;
+  try {
+    const resp = await fetch(`/pdfs/${encodeURIComponent(pdfId)}`, { method: 'DELETE' });
+    const result = await resp.json();
+    closeDetail();
+    loadPdfs();
+    checkHealth();
+  } catch (err) {
+    alert(`Delete failed: ${err.message}`);
+  }
+}
+
+// --- Page Viewer ---
+let pvPdfId = '';
+let pvPages = [];
+let pvCurrentIdx = 0;
+
+async function openPageViewer(pdfId, pageNumbers) {
+  pvPdfId = pdfId;
+  pvPages = pageNumbers;
+  pvCurrentIdx = 0;
+
+  const viewer = document.getElementById('pageViewer');
+  const select = document.getElementById('pvSelect');
+  document.getElementById('pvTitle').textContent = pdfId;
+
+  select.innerHTML = pvPages.map((p, i) =>
+    `<option value="${i}">Page ${p}</option>`
+  ).join('');
+
+  viewer.classList.add('open');
+  document.getElementById('pvBody').className = 'page-viewer-body';
+  await pvLoadPage(0);
+  viewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function pvLoadPage(idx) {
+  if (idx < 0 || idx >= pvPages.length) return;
+  pvCurrentIdx = idx;
+  const pageNum = pvPages[idx];
+  const body = document.getElementById('pvBody');
+  const select = document.getElementById('pvSelect');
+
+  body.className = 'page-viewer-body';
+  body.innerHTML = '<span class="spinner"></span> Loading...';
+  select.value = idx;
+
+  document.getElementById('pvPrev').disabled = idx === 0;
+  document.getElementById('pvNext').disabled = idx >= pvPages.length - 1;
+
+  try {
+    const resp = await fetch(`/pdf/${encodeURIComponent(pvPdfId)}/pages/${pageNum}`);
+    const data = await resp.json();
+    body.textContent = data.text || '(empty page)';
+  } catch (err) {
+    body.innerHTML = `<span style="color:#ef4444">Failed: ${esc(err.message)}</span>`;
+  }
+}
+
+async function pvLoadAll() {
+  const body = document.getElementById('pvBody');
+  body.className = 'page-viewer-body page-viewer-all';
+  body.innerHTML = '<span class="spinner"></span> Loading all pages...';
+
+  try {
+    const resp = await fetch(`/pdf/${encodeURIComponent(pvPdfId)}/pages?include_text=true`);
+    const data = await resp.json();
+
+    if (data.hits.length === 0) {
+      body.innerHTML = '<div class="empty">No pages found.</div>';
+      return;
+    }
+
+    body.innerHTML = data.hits.map(hit => `
+      <div class="pv-page">
+        <div class="pv-page-header">Page ${hit.page_number}</div>
+        <div class="pv-page-text">${esc(hit.text || '(empty)')}</div>
+      </div>
+    `).join('');
+  } catch (err) {
+    body.innerHTML = `<span style="color:#ef4444">Failed: ${esc(err.message)}</span>`;
+  }
+}
+
+function pvNav(delta) { pvLoadPage(pvCurrentIdx + delta); }
+function pvGoTo(idx) { pvLoadPage(parseInt(idx, 10)); }
+
+function closePageViewer() {
+  document.getElementById('pageViewer').classList.remove('open');
+}
+
+// --- Search ---
+const SEARCH_PAGE_SIZE = 30;
+let searchPage = 0;
+let searchTotal = 0;
+let lastSearchQuery = '';
+
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch(0);
+});
+document.getElementById('searchBtn').addEventListener('click', () => doSearch(0));
+document.getElementById('searchPrevBtn').addEventListener('click', () => doSearch(searchPage - 1));
+document.getElementById('searchNextBtn').addEventListener('click', () => doSearch(searchPage + 1));
+
+async function doSearch(page) {
+  const q = document.getElementById('searchInput').value.trim();
+  if (!q) return;
+
+  searchPage = Math.max(0, page);
+  lastSearchQuery = q;
+  const mode = document.querySelector('input[name="searchMode"]:checked').value;
+  const resultsEl = document.getElementById('searchResults');
+  const infoEl = document.getElementById('searchInfo');
+  const pagEl = document.getElementById('searchPagination');
+
+  infoEl.innerHTML = '<span class="spinner"></span> Searching...';
+  resultsEl.innerHTML = '';
+  pagEl.style.display = 'none';
+
+  try {
+    const endpoint = mode === 'phrase' ? '/search/phrase' : '/search';
+    const params = new URLSearchParams({ q, page: searchPage, page_size: SEARCH_PAGE_SIZE });
+    const resp = await fetch(`${endpoint}?${params}`);
+    const data = await resp.json();
+
+    searchTotal = data.total;
+    const totalPages = Math.ceil(searchTotal / SEARCH_PAGE_SIZE);
+
+    if (searchTotal === 0) {
+      infoEl.textContent = `No results for "${q}"`;
+      return;
+    }
+
+    infoEl.textContent = `${searchTotal} result${searchTotal !== 1 ? 's' : ''} for "${q}"`;
+
+    resultsEl.innerHTML = data.hits.map(hit => {
+      const viewUrl = `/view/${encodeURIComponent(hit.pdf_id)}/${hit.page_number}`;
+      return `
+      <a class="search-hit" href="${viewUrl}" target="_blank" rel="noopener" title="Open page in new tab">
+        <div class="hit-header">
+          <span>
+            <span class="hit-pdf">${esc(hit.pdf_filename || hit.pdf_id)}</span>
+            <span class="hit-page">— page ${hit.page_number}</span>
+          </span>
+          <span class="hit-score">score ${hit.score.toFixed(2)}</span>
+        </div>
+        ${hit.highlight ? `<div class="hit-snippet">${hit.highlight}</div>` : ''}
+      </a>`;
+    }).join('');
+
+    if (totalPages > 1) {
+      pagEl.style.display = 'flex';
+      document.getElementById('searchPrevBtn').disabled = searchPage === 0;
+      document.getElementById('searchNextBtn').disabled = searchPage >= totalPages - 1;
+      document.getElementById('searchPageInfo').textContent = `Page ${searchPage + 1} of ${totalPages}`;
+    }
+  } catch (err) {
+    infoEl.textContent = '';
+    resultsEl.innerHTML = `<div class="empty" style="color:#ef4444">Search failed: ${esc(err.message)}</div>`;
+  }
+}
+
+// --- Helpers ---
+function esc(s) {
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el.innerHTML;
+}
+
+function formatBytes(b) {
+  if (b == null) return '—';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+</script>
+</body>
+</html>
